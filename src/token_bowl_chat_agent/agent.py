@@ -23,7 +23,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 from rich.console import Console
-
 from token_bowl_chat import AsyncTokenBowlClient, MessageResponse, TokenBowlWebSocket
 
 # MCP imports (optional)
@@ -59,15 +58,11 @@ MAX_SENT_MESSAGES_TRACKED = 1000  # Limit sent message tracking to prevent memor
 MAX_MESSAGE_QUEUE_SIZE = 1000  # Maximum messages to queue before processing
 
 # Similarity detection constants
-SIMILARITY_THRESHOLD = (
-    0.85  # Similarity threshold for detecting repetitive responses (0.0-1.0)
-)
+SIMILARITY_THRESHOLD = 0.85  # Similarity threshold for detecting repetitive responses (0.0-1.0)
 SIMILARITY_CHECK_COUNT = 3  # Number of previous messages to check for similarity
 
 # Conversation history management
-MAX_CONVERSATION_HISTORY = (
-    10  # Maximum number of messages to keep in conversation history
-)
+MAX_CONVERSATION_HISTORY = 10  # Maximum number of messages to keep in conversation history
 
 # Retry mechanism constants
 MAX_RETRY_ATTEMPTS = 3  # Maximum number of retry attempts per message
@@ -115,9 +110,7 @@ class AgentStats:
         """Convert stats to dictionary for JSON serialization."""
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "uptime_seconds": int(
-                (datetime.now(timezone.utc) - self.start_time).total_seconds()
-            ),
+            "uptime_seconds": int((datetime.now(timezone.utc) - self.start_time).total_seconds()),
             "messages_received": self.messages_received,
             "messages_sent": self.messages_sent,
             "errors": self.errors,
@@ -164,24 +157,22 @@ class TokenBowlAgent:
             user_prompt: User prompt for processing messages
             model_name: OpenRouter model name (default: openai/gpt-4o-mini)
             server_url: WebSocket server URL
-            queue_interval: Seconds to wait before flushing message queue (default: 30.0)
-            max_reconnect_delay: Maximum delay between reconnection attempts (seconds)
-            context_window: Maximum context window in tokens (default: 128000)
-            cooldown_messages: Number of messages before cooldown starts (default: 3)
+            queue_interval: Seconds before flushing message queue (default: 30.0)
+            max_reconnect_delay: Max delay between reconnect attempts (seconds)
+            context_window: Max context window in tokens (default: 128000)
+            cooldown_messages: Messages before cooldown starts (default: 3)
             cooldown_minutes: Cooldown duration in minutes (default: 10)
-            max_conversation_history: Maximum number of messages to keep in conversation history (default: 10)
-            mcp_enabled: Enable MCP (Model Context Protocol) tools (default: True)
-            mcp_server_url: MCP server URL (default: https://tokenbowl-mcp.haihai.ai/sse)
-            similarity_threshold: Threshold for detecting repetitive responses (0.0-1.0, default: 0.85)
-            max_retry_attempts: Maximum number of retry attempts per message (default: 3)
-            retry_base_delay: Base delay in seconds for exponential backoff (default: 5)
+            max_conversation_history: Max messages to keep in history (default: 10)
+            mcp_enabled: Enable MCP tools (default: True)
+            mcp_server_url: MCP server URL
+            similarity_threshold: Repetitive response threshold (default: 0.85)
+            max_retry_attempts: Max retry attempts per message (default: 3)
+            retry_base_delay: Base delay for exponential backoff (default: 5)
             max_retry_delay: Maximum retry delay in seconds (default: 60)
             verbose: Enable verbose logging
         """
         self.api_key = api_key or os.getenv("TOKEN_BOWL_CHAT_API_KEY", "")
-        self.openrouter_api_key = openrouter_api_key or os.getenv(
-            "OPENROUTER_API_KEY", ""
-        )
+        self.openrouter_api_key = openrouter_api_key or os.getenv("OPENROUTER_API_KEY", "")
         self.model_name = model_name
         self.server_url = server_url
         self.queue_interval = queue_interval
@@ -192,7 +183,8 @@ class TokenBowlAgent:
             raise ValueError("context_window must be at least 1000 tokens")
         if context_window > 1000000:
             console.print(
-                f"[yellow]Warning: Large context window ({context_window} tokens) may consume significant RAM[/yellow]"
+                f"[yellow]Warning: Large context window ({context_window} tokens) "
+                f"may consume significant RAM[/yellow]"
             )
         self.context_window = context_window
 
@@ -201,7 +193,9 @@ class TokenBowlAgent:
             raise ValueError("max_conversation_history must be at least 1")
         if max_conversation_history > 100:
             console.print(
-                f"[yellow]Warning: Large conversation history ({max_conversation_history} messages) may consume significant memory[/yellow]"
+                f"[yellow]Warning: Large conversation history "
+                f"({max_conversation_history} messages) may use "
+                f"significant memory[/yellow]"
             )
         self.max_conversation_history = max_conversation_history
 
@@ -222,12 +216,8 @@ class TokenBowlAgent:
 
         # Message queue and processing
         # Limit queue size to prevent unbounded growth under heavy load
-        self.message_queue: deque[MessageQueueItem] = deque(
-            maxlen=MAX_MESSAGE_QUEUE_SIZE
-        )
-        self.failed_messages: deque[MessageQueueItem] = deque(
-            maxlen=MAX_MESSAGE_QUEUE_SIZE
-        )
+        self.message_queue: deque[MessageQueueItem] = deque(maxlen=MAX_MESSAGE_QUEUE_SIZE)
+        self.failed_messages: deque[MessageQueueItem] = deque(maxlen=MAX_MESSAGE_QUEUE_SIZE)
         self.processing_lock = asyncio.Lock()
         self.last_flush_time = datetime.now(timezone.utc)
 
@@ -258,9 +248,7 @@ class TokenBowlAgent:
         self.sent_messages: OrderedDict[str, str] = (
             OrderedDict()
         )  # message_id -> content (populated on echo)
-        self.sent_message_contents: deque[str] = deque(
-            maxlen=100
-        )  # Recently sent content
+        self.sent_message_contents: deque[str] = deque(maxlen=100)  # Recently sent content
 
         # Processed message tracking to prevent retry loops
         # Track message IDs we've already attempted to process (successfully or not)
@@ -301,9 +289,7 @@ class TokenBowlAgent:
             try:
                 return path.read_text(encoding="utf-8")
             except Exception as e:
-                console.print(
-                    f"[yellow]Warning: Could not read prompt file {prompt}: {e}[/yellow]"
-                )
+                console.print(f"[yellow]Warning: Could not read prompt file {prompt}: {e}[/yellow]")
                 return default
 
         # Otherwise, treat as raw text
@@ -328,9 +314,7 @@ class TokenBowlAgent:
         )
 
         if self.verbose:
-            console.print(
-                f"[dim]Initialized LLM: {self.model_name} with OpenRouter[/dim]"
-            )
+            console.print(f"[dim]Initialized LLM: {self.model_name} with OpenRouter[/dim]")
 
         # Initialize MCP client and tools if enabled
         if self.mcp_enabled:
@@ -340,7 +324,8 @@ class TokenBowlAgent:
         """Initialize MCP client and load tools."""
         if not MCP_AVAILABLE:
             console.print(
-                "[yellow]MCP libraries not available. Install with: pip install langchain-mcp-adapters mcp[/yellow]"
+                "[yellow]MCP libraries not available. "
+                "Install with: pip install langchain-mcp-adapters mcp[/yellow]"
             )
             self.mcp_enabled = False
             return
@@ -361,9 +346,8 @@ class TokenBowlAgent:
 
             if self.verbose:
                 console.print(f"[dim]MCP: Connected to {self.mcp_server_url}[/dim]")
-                console.print(
-                    f"[dim]MCP: Loaded {len(self.mcp_tools)} tools: {[t.name for t in self.mcp_tools]}[/dim]"
-                )
+                tool_names = [t.name for t in self.mcp_tools]
+                console.print(f"[dim]MCP: Loaded {len(self.mcp_tools)} tools: {tool_names}[/dim]")
 
             # Create LangChain agent with tools
             if self.mcp_tools and self.llm:
@@ -373,9 +357,8 @@ class TokenBowlAgent:
                     system_prompt=self.system_prompt,
                 )
 
-                console.print(
-                    f"[bold green]✓ MCP enabled with {len(self.mcp_tools)} tools[/bold green]"
-                )
+                tool_count = len(self.mcp_tools)
+                console.print(f"[bold green]✓ MCP enabled with {tool_count} tools[/bold green]")
 
         except Exception as e:
             console.print(f"[yellow]Warning: Failed to initialize MCP: {e}[/yellow]")
@@ -423,8 +406,10 @@ class TokenBowlAgent:
 
             if self.verbose:
                 msg_type = "User" if isinstance(removed_msg, HumanMessage) else "AI"
+                limit = self.max_conversation_history
                 console.print(
-                    f"[dim]Trimmed {msg_type} message from history (keeping last {self.max_conversation_history} messages)[/dim]"
+                    f"[dim]Trimmed {msg_type} message from history "
+                    f"(keeping last {limit} messages)[/dim]"
                 )
 
     def _cleanup_sent_messages(self) -> None:
@@ -469,7 +454,8 @@ class TokenBowlAgent:
             if similarity >= self.similarity_threshold:
                 if self.verbose:
                     console.print(
-                        f"[yellow]Detected repetitive response (similarity: {similarity:.2f})[/yellow]"
+                        f"[yellow]Detected repetitive response "
+                        f"(similarity: {similarity:.2f})[/yellow]"
                     )
                 return True
 
@@ -505,7 +491,8 @@ class TokenBowlAgent:
             self.last_flush_time = datetime.now(timezone.utc)
 
             console.print(
-                "[bold yellow]🔄 Global reset performed - all state cleared, waiting for next input[/bold yellow]"
+                "[bold yellow]🔄 Global reset performed - all state cleared, "
+                "waiting for next input[/bold yellow]"
             )
 
     async def _calculate_backoff_delay(self) -> float:
@@ -528,8 +515,10 @@ class TokenBowlAgent:
         while self.is_running:
             try:
                 if self.verbose:
+                    attempt = self.reconnect_attempts + 1
                     console.print(
-                        f"[dim]Attempting WebSocket connection to {self.server_url} (attempt {self.reconnect_attempts + 1})[/dim]"
+                        f"[dim]Attempting WebSocket connection to "
+                        f"{self.server_url} (attempt {attempt})[/dim]"
                     )
 
                 self.ws = TokenBowlWebSocket(
@@ -561,7 +550,8 @@ class TokenBowlAgent:
                     exc_info=True,
                 )
                 console.print(
-                    f"[yellow]Connection to {self.server_url} failed: {e}. Retrying in {delay:.1f}s...[/yellow]"
+                    f"[yellow]Connection to {self.server_url} failed: {e}. "
+                    f"Retrying in {delay:.1f}s...[/yellow]"
                 )
 
                 self.reconnect_attempts += 1
@@ -599,9 +589,7 @@ class TokenBowlAgent:
         # Skip messages we've already processed to prevent retry loops
         if msg.id in self.processed_message_ids:
             if self.verbose:
-                console.print(
-                    f"[dim]Skipping already processed message: {msg.id[:8]}...[/dim]"
-                )
+                console.print(f"[dim]Skipping already processed message: {msg.id[:8]}...[/dim]")
             return
 
         # Queue message for processing
@@ -618,13 +606,12 @@ class TokenBowlAgent:
 
         if self.verbose:
             msg_type = "DM" if queue_item.is_direct else "room"
-            console.print(
-                f"[dim]Queued {msg_type} message from {msg.from_username}: {msg.content[:50]}...[/dim]"
-            )
+            preview = msg.content[:50]
+            console.print(f"[dim]Queued {msg_type} from {msg.from_username}: {preview}...[/dim]")
 
         # Mark message as read immediately after queuing
         if self.ws:
-            asyncio.create_task(self.ws.mark_message_read(msg.id))
+            _ = asyncio.create_task(self.ws.mark_message_read(msg.id))
 
     def _on_read_receipt(self, message_id: str, read_by: str) -> None:
         """Handle read receipts.
@@ -649,7 +636,8 @@ class TokenBowlAgent:
         if "Missing content field" in error_msg:
             if self.verbose:
                 console.print(
-                    "[dim yellow]Server validation warning (non-fatal): Missing content field[/dim yellow]"
+                    "[dim yellow]Server validation warning (non-fatal): "
+                    "Missing content field[/dim yellow]"
                 )
             return
 
@@ -665,7 +653,8 @@ class TokenBowlAgent:
         """
         if self.verbose:
             console.print(
-                "[yellow]WebSocket disconnected by server (connection may have been replaced)[/yellow]"
+                "[yellow]WebSocket disconnected by server "
+                "(connection may have been replaced)[/yellow]"
             )
 
     def _is_in_cooldown(self) -> bool:
@@ -677,9 +666,7 @@ class TokenBowlAgent:
         if self.cooldown_start_time is None:
             return False
 
-        elapsed = (
-            datetime.now(timezone.utc) - self.cooldown_start_time
-        ).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - self.cooldown_start_time).total_seconds()
         return elapsed < self.cooldown_duration_seconds
 
     def _get_cooldown_remaining(self) -> int:
@@ -691,9 +678,7 @@ class TokenBowlAgent:
         if self.cooldown_start_time is None:
             return 0
 
-        elapsed = (
-            datetime.now(timezone.utc) - self.cooldown_start_time
-        ).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - self.cooldown_start_time).total_seconds()
         remaining = max(0, self.cooldown_duration_seconds - elapsed)
         return int(remaining)
 
@@ -706,20 +691,19 @@ class TokenBowlAgent:
         old_history_size = len(self.conversation_history)
         self.conversation_history.clear()
 
+        cooldown_mins = self.cooldown_duration_seconds // 60
         console.print(
-            f"\n[bold yellow]🕐 Cooldown started - {self.cooldown_duration_seconds // 60} minute break[/bold yellow]"
+            f"\n[bold yellow]🕐 Cooldown started - {cooldown_mins} minute break[/bold yellow]"
         )
         console.print(
-            f"[dim yellow]Cleared {old_history_size} messages from conversation history[/dim yellow]\n"
+            f"[dim yellow]Cleared {old_history_size} messages from history[/dim yellow]\n"
         )
 
     def _end_cooldown(self) -> None:
         """End cooldown period and reset counters."""
         self.cooldown_start_time = None
         self.messages_sent_in_window = 0
-        console.print(
-            "[bold green]✓ Cooldown ended - Ready to respond to messages[/bold green]\n"
-        )
+        console.print("[bold green]✓ Cooldown ended - Ready to respond to messages[/bold green]\n")
 
     def _calculate_retry_delay(self, retry_count: int) -> float:
         """Calculate exponential backoff delay for retries.
@@ -762,9 +746,7 @@ class TokenBowlAgent:
 
         # Check if enough time has passed since last attempt
         delay = self._calculate_retry_delay(message.retry_count)
-        elapsed = (
-            datetime.now(timezone.utc) - message.last_attempt_time
-        ).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - message.last_attempt_time).total_seconds()
 
         return elapsed >= delay
 
@@ -787,7 +769,7 @@ class TokenBowlAgent:
                 # Permanently failed
                 self.stats.messages_failed_permanently += 1
                 logger.error(
-                    "Message failed permanently: message_id=%s, retry_count=%d, from=%s, content=%s, error=%s",
+                    "Message failed permanently: id=%s, retries=%d, from=%s, content=%s, error=%s",
                     msg.message_id,
                     msg.retry_count,
                     msg.from_username,
@@ -796,7 +778,8 @@ class TokenBowlAgent:
                 )
                 if self.verbose:
                     console.print(
-                        f"[red]✗ Message {msg.message_id} failed permanently after {msg.retry_count} attempts: {msg.last_error}[/red]"
+                        f"[red]✗ Message {msg.message_id} failed after "
+                        f"{msg.retry_count} attempts: {msg.last_error}[/red]"
                     )
 
         # Update failed queue
@@ -810,7 +793,8 @@ class TokenBowlAgent:
             self.stats.retries += 1
             if self.verbose:
                 console.print(
-                    f"[yellow]🔄 Retrying message {msg.message_id} (attempt {msg.retry_count}/{self.max_retry_attempts})[/yellow]"
+                    f"[yellow]🔄 Retrying message {msg.message_id} "
+                    f"(attempt {msg.retry_count}/{self.max_retry_attempts})[/yellow]"
                 )
             self.message_queue.append(msg)
 
@@ -819,13 +803,9 @@ class TokenBowlAgent:
         try:
             # Create HTTP client for fetching unread messages
             # Convert wss:// to https:// for the HTTP API
-            http_base_url = self.server_url.replace("wss://", "https://").replace(
-                "/ws", ""
-            )
+            http_base_url = self.server_url.replace("wss://", "https://").replace("/ws", "")
 
-            async with AsyncTokenBowlClient(
-                api_key=self.api_key, base_url=http_base_url
-            ) as client:
+            async with AsyncTokenBowlClient(api_key=self.api_key, base_url=http_base_url) as client:
                 # Fetch unread room messages
                 unread_room = await client.get_unread_messages(limit=100)
 
@@ -836,17 +816,17 @@ class TokenBowlAgent:
                 all_unread = unread_room + unread_dms
 
                 if all_unread:
+                    room_count = len(unread_room)
+                    dm_count = len(unread_dms)
                     console.print(
-                        f"[cyan]📨 Found {len(unread_room)} unread room messages and {len(unread_dms)} unread DMs[/cyan]"
+                        f"[cyan]📨 Found {room_count} unread room messages "
+                        f"and {dm_count} unread DMs[/cyan]"
                     )
 
                     # Queue each unread message for processing
                     for msg in all_unread:
                         # Skip if we've already processed or sent this message
-                        if (
-                            msg.id in self.sent_messages
-                            or msg.id in self.processed_message_ids
-                        ):
+                        if msg.id in self.sent_messages or msg.id in self.processed_message_ids:
                             continue
 
                         queue_item = MessageQueueItem(
@@ -854,9 +834,7 @@ class TokenBowlAgent:
                             content=msg.content,
                             from_username=msg.from_username,
                             to_username=msg.to_username,
-                            timestamp=datetime.fromisoformat(
-                                msg.timestamp.replace("Z", "+00:00")
-                            ),
+                            timestamp=datetime.fromisoformat(msg.timestamp.replace("Z", "+00:00")),
                             is_direct=msg.message_type == "direct",
                         )
 
@@ -864,20 +842,20 @@ class TokenBowlAgent:
 
                         if self.verbose:
                             msg_type = "DM" if queue_item.is_direct else "room"
+                            preview = msg.content[:50]
                             console.print(
-                                f"[dim]Queued unread {msg_type} message from {msg.from_username}: {msg.content[:50]}...[/dim]"
+                                f"[dim]Queued unread {msg_type} from "
+                                f"{msg.from_username}: {preview}...[/dim]"
                             )
 
                         # Mark message as read
                         if self.ws:
-                            asyncio.create_task(self.ws.mark_message_read(msg.id))
+                            _ = asyncio.create_task(self.ws.mark_message_read(msg.id))
 
                     self.stats.messages_received += len(all_unread)
 
         except Exception as e:
-            console.print(
-                f"[yellow]Warning: Failed to fetch unread messages: {e}[/yellow]"
-            )
+            console.print(f"[yellow]Warning: Failed to fetch unread messages: {e}[/yellow]")
             if self.verbose:
                 import traceback
 
@@ -893,15 +871,11 @@ class TokenBowlAgent:
             return
 
         # Filter out already-processed messages (deduplication)
-        new_messages = [
-            m for m in messages if m.message_id not in self.processed_message_ids
-        ]
+        new_messages = [m for m in messages if m.message_id not in self.processed_message_ids]
 
         if not new_messages:
             if self.verbose:
-                console.print(
-                    "[dim]Skipping batch - all messages already processed[/dim]"
-                )
+                console.print("[dim]Skipping batch - all messages already processed[/dim]")
             return
 
         # Update attempt time for all messages in batch
@@ -935,9 +909,7 @@ class TokenBowlAgent:
                     # Add conversation history
                     for msg in self.conversation_history:
                         if isinstance(msg, HumanMessage):
-                            agent_messages.append(
-                                {"role": "user", "content": str(msg.content)}
-                            )
+                            agent_messages.append({"role": "user", "content": str(msg.content)})
                         elif isinstance(msg, AIMessage):
                             agent_messages.append(
                                 {"role": "assistant", "content": str(msg.content)}
@@ -974,13 +946,9 @@ class TokenBowlAgent:
                     # Add conversation history
                     for msg in self.conversation_history:
                         if isinstance(msg, HumanMessage):
-                            llm_messages.append(
-                                {"role": "user", "content": msg.content}
-                            )
+                            llm_messages.append({"role": "user", "content": msg.content})
                         elif isinstance(msg, AIMessage):
-                            llm_messages.append(
-                                {"role": "assistant", "content": msg.content}
-                            )
+                            llm_messages.append({"role": "assistant", "content": msg.content})
 
                     llm_messages.append({"role": "user", "content": prompt})
 
@@ -997,15 +965,14 @@ class TokenBowlAgent:
             # Skip sending if response is empty
             if not response_text:
                 if self.verbose:
-                    console.print(
-                        "[yellow]Skipping send - LLM returned empty response[/yellow]"
-                    )
+                    console.print("[yellow]Skipping send - LLM returned empty response[/yellow]")
                 return
 
             # Check for repetitive responses
             if self._is_repetitive_response(response_text):
                 console.print(
-                    "[bold yellow]⚠️  Detected repetitive response - performing global reset[/bold yellow]"
+                    "[bold yellow]⚠️  Detected repetitive response - "
+                    "performing global reset[/bold yellow]"
                 )
                 await self._global_reset()
                 # Do not send the repetitive message
@@ -1043,9 +1010,8 @@ class TokenBowlAgent:
                     self.stats.messages_sent += 1
 
                     msg_type = f"DM to {to_username}" if to_username else "room"
-                    console.print(
-                        f"[green]→ Sent {msg_type} response: {response_text[:100]}...[/green]"
-                    )
+                    preview = response_text[:100]
+                    console.print(f"[green]→ Sent {msg_type} response: {preview}...[/green]")
 
                     # Cooldown mechanism: Track messages and start cooldown after 3 messages
                     self.messages_sent_in_window += 1
@@ -1058,7 +1024,8 @@ class TokenBowlAgent:
 
                     if self.verbose:
                         console.print(
-                            f"[dim]✓ Successfully processed and sent response for {len(new_messages)} message(s)[/dim]"
+                            f"[dim]✓ Successfully processed and sent response "
+                            f"for {len(new_messages)} message(s)[/dim]"
                         )
 
             except Exception as e:
@@ -1134,19 +1101,17 @@ class TokenBowlAgent:
                             minutes = remaining // 60
                             seconds = remaining % 60
                             if self.verbose:
+                                queued = len(self.message_queue)
                                 console.print(
                                     f"[dim yellow]In cooldown - {minutes}m {seconds}s remaining. "
-                                    f"Keeping {len(self.message_queue)} message(s) queued.[/dim yellow]"
+                                    f"Keeping {queued} message(s) queued.[/dim yellow]"
                                 )
                             # Don't clear queue - messages will be processed after cooldown
                             self.last_flush_time = datetime.now(timezone.utc)
                             continue
 
                         # Check if cooldown just ended
-                        if (
-                            self.cooldown_start_time is not None
-                            and not self._is_in_cooldown()
-                        ):
+                        if self.cooldown_start_time is not None and not self._is_in_cooldown():
                             self._end_cooldown()
 
                         # Collect all queued messages
@@ -1174,26 +1139,30 @@ class TokenBowlAgent:
                 remaining = self._get_cooldown_remaining()
                 minutes = remaining // 60
                 seconds = remaining % 60
-                cooldown_status = (
-                    f"[yellow]In cooldown ({minutes}m {seconds}s remaining)[/yellow]"
-                )
+                cooldown_status = f"[yellow]In cooldown ({minutes}m {seconds}s remaining)[/yellow]"
             else:
-                cooldown_status = f"{self.messages_sent_in_window}/{self.messages_per_window} messages"
+                sent = self.messages_sent_in_window
+                limit = self.messages_per_window
+                cooldown_status = f"{sent}/{limit} messages"
 
             # Build retry status line
             retry_status = f"{self.stats.retries} retries"
             if self.failed_messages:
                 retry_status += f", {len(self.failed_messages)} pending"
             if self.stats.messages_failed_permanently > 0:
-                retry_status += (
-                    f", {self.stats.messages_failed_permanently} failed permanently"
-                )
+                retry_status += f", {self.stats.messages_failed_permanently} failed permanently"
+
+            # Format stats for display
+            recv = self.stats.messages_received
+            sent_msgs = self.stats.messages_sent
+            in_tok = self.stats.total_input_tokens
+            out_tok = self.stats.total_output_tokens
 
             console.print(
                 f"\n[bold cyan]📊 Agent Statistics[/bold cyan]\n"
                 f"  Uptime: {self.stats.uptime()}\n"
-                f"  Messages: {self.stats.messages_received} received, {self.stats.messages_sent} sent\n"
-                f"  Tokens: {self.stats.total_input_tokens} in, {self.stats.total_output_tokens} out\n"
+                f"  Messages: {recv} received, {sent_msgs} sent\n"
+                f"  Tokens: {in_tok} in, {out_tok} out\n"
                 f"  Reconnections: {self.stats.reconnections}\n"
                 f"  Errors: {self.stats.errors} ({retry_status})\n"
                 f"  Cooldown: {cooldown_status}\n"
@@ -1221,9 +1190,7 @@ class TokenBowlAgent:
 
                 # If we get here, the connection was closed gracefully
                 if self.is_running:
-                    console.print(
-                        "[yellow]WebSocket connection closed, reconnecting...[/yellow]"
-                    )
+                    console.print("[yellow]WebSocket connection closed, reconnecting...[/yellow]")
                     self.ws = None
                     await self._reconnect_websocket()
 
@@ -1264,9 +1231,7 @@ class TokenBowlAgent:
         try:
             # Connect to WebSocket
             if not await self._connect_websocket():
-                console.print(
-                    f"[bold red]Failed to connect to {self.server_url}[/bold red]"
-                )
+                console.print(f"[bold red]Failed to connect to {self.server_url}[/bold red]")
                 return
 
             console.print(
@@ -1311,26 +1276,30 @@ class TokenBowlAgent:
                 remaining = self._get_cooldown_remaining()
                 minutes = remaining // 60
                 seconds = remaining % 60
-                cooldown_status = (
-                    f"[yellow]In cooldown ({minutes}m {seconds}s remaining)[/yellow]"
-                )
+                cooldown_status = f"[yellow]In cooldown ({minutes}m {seconds}s remaining)[/yellow]"
             else:
-                cooldown_status = f"{self.messages_sent_in_window}/{self.messages_per_window} messages"
+                sent = self.messages_sent_in_window
+                limit = self.messages_per_window
+                cooldown_status = f"{sent}/{limit} messages"
 
             # Build final retry status line
             retry_status = f"{self.stats.retries} retries"
             if self.failed_messages:
                 retry_status += f", {len(self.failed_messages)} pending"
             if self.stats.messages_failed_permanently > 0:
-                retry_status += (
-                    f", {self.stats.messages_failed_permanently} failed permanently"
-                )
+                retry_status += f", {self.stats.messages_failed_permanently} failed permanently"
+
+            # Format final stats for display
+            recv = self.stats.messages_received
+            sent_msgs = self.stats.messages_sent
+            in_tok = self.stats.total_input_tokens
+            out_tok = self.stats.total_output_tokens
 
             console.print(
                 f"\n[bold cyan]📊 Final Statistics[/bold cyan]\n"
                 f"  Total uptime: {self.stats.uptime()}\n"
-                f"  Messages: {self.stats.messages_received} received, {self.stats.messages_sent} sent\n"
-                f"  Tokens: {self.stats.total_input_tokens} in, {self.stats.total_output_tokens} out\n"
+                f"  Messages: {recv} received, {sent_msgs} sent\n"
+                f"  Tokens: {in_tok} in, {out_tok} out\n"
                 f"  Reconnections: {self.stats.reconnections}\n"
                 f"  Errors: {self.stats.errors} ({retry_status})\n"
                 f"  Cooldown: {cooldown_status}\n"

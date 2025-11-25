@@ -1,9 +1,10 @@
 """Tests for TokenBowlAgent."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-from token_bowl_chat_agent import TokenBowlAgent, AgentStats, MessageQueueItem
+import pytest
+
+from token_bowl_chat_agent import AgentStats, TokenBowlAgent
 
 
 class TestTokenBowlAgent:
@@ -11,10 +12,7 @@ class TestTokenBowlAgent:
 
     def test_agent_initialization(self):
         """Test agent initializes with required parameters."""
-        agent = TokenBowlAgent(
-            api_key="test_key",
-            openrouter_api_key="test_openrouter_key"
-        )
+        agent = TokenBowlAgent(api_key="test_key", openrouter_api_key="test_openrouter_key")
 
         assert agent.api_key == "test_key"
         assert agent.openrouter_api_key == "test_openrouter_key"
@@ -33,10 +31,7 @@ class TestTokenBowlAgent:
                 "OPENROUTER_API_KEY": "env_openrouter_key",
             },
         ):
-            agent = TokenBowlAgent(
-                api_key="",
-                openrouter_api_key=""
-            )
+            agent = TokenBowlAgent(api_key="", openrouter_api_key="")
 
             assert agent.api_key == "env_api_key"
             assert agent.openrouter_api_key == "env_openrouter_key"
@@ -138,20 +133,14 @@ class TestTokenBowlAgent:
     @pytest.mark.asyncio
     async def test_run_without_api_key(self):
         """Test run method raises error without API key."""
-        agent = TokenBowlAgent(
-            api_key="",
-            openrouter_api_key="test_openrouter_key"
-        )
+        agent = TokenBowlAgent(api_key="", openrouter_api_key="test_openrouter_key")
 
         with pytest.raises(ValueError, match="Token Bowl Chat API key required"):
             await agent.run()
 
     def test_calculate_similarity(self):
         """Test text similarity calculation."""
-        agent = TokenBowlAgent(
-            api_key="test_key",
-            openrouter_api_key="test_openrouter_key"
-        )
+        agent = TokenBowlAgent(api_key="test_key", openrouter_api_key="test_openrouter_key")
 
         # Test identical texts
         similarity = agent._calculate_similarity("Hello world", "Hello world")
@@ -162,10 +151,7 @@ class TestTokenBowlAgent:
         assert similarity < 0.5
 
         # Test similar texts
-        similarity = agent._calculate_similarity(
-            "The quick brown fox",
-            "The quick brown foxes"
-        )
+        similarity = agent._calculate_similarity("The quick brown fox", "The quick brown foxes")
         assert similarity > 0.8
 
     def test_is_repetitive_response(self):

@@ -9,8 +9,8 @@ from .agent import (
 __version__ = "1.0.0"
 
 __all__ = [
-    "__version__",
-    "TokenBowlAgent",
     "AgentStats",
     "MessageQueueItem",
+    "TokenBowlAgent",
+    "__version__",
 ]

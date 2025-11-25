@@ -1,12 +1,10 @@
 """Command-line interface for Token Bowl Chat Agent."""
 
 import asyncio
-import os
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console
-
 from token_bowl_chat import AsyncTokenBowlClient
 
 from .agent import TokenBowlAgent
@@ -20,7 +18,7 @@ console = Console()
 
 # Common options
 ApiKey = Annotated[
-    Optional[str],
+    str | None,
     typer.Option(
         "--api-key",
         "-k",
@@ -29,7 +27,7 @@ ApiKey = Annotated[
     ),
 ]
 OpenRouterKey = Annotated[
-    Optional[str],
+    str | None,
     typer.Option(
         "--openrouter-key",
         "-o",
@@ -38,7 +36,7 @@ OpenRouterKey = Annotated[
     ),
 ]
 SystemPrompt = Annotated[
-    Optional[str],
+    str | None,
     typer.Option(
         "--system",
         "-s",
@@ -46,11 +44,11 @@ SystemPrompt = Annotated[
     ),
 ]
 UserPrompt = Annotated[
-    Optional[str],
+    str | None,
     typer.Option(
         "--user",
         "-u",
-        help="User prompt (batch processing instructions) - text or path to markdown file",
+        help="User prompt (batch processing instructions) - text or file path",
     ),
 ]
 Model = Annotated[
@@ -225,7 +223,7 @@ def send(
     message: Annotated[str, typer.Argument(help="Message to send")],
     api_key: ApiKey = None,
     to: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--to",
             "-t",
@@ -255,13 +253,9 @@ def send(
             response = await client.send_message(message, to_username=to)
 
             if to:
-                console.print(
-                    f"[green]✓ Sent DM to @{to}:[/green] {response.content[:100]}"
-                )
+                console.print(f"[green]✓ Sent DM to @{to}:[/green] {response.content[:100]}")
             else:
-                console.print(
-                    f"[green]✓ Sent to room:[/green] {response.content[:100]}"
-                )
+                console.print(f"[green]✓ Sent to room:[/green] {response.content[:100]}")
 
             if verbose:
                 console.print(f"[dim]Message ID: {response.id}[/dim]")
@@ -270,7 +264,7 @@ def send(
         asyncio.run(_send())
     except Exception as e:
         console.print(f"[red]Error sending message: {e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def main() -> None:

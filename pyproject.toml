@@ -48,8 +48,9 @@ dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
-    "ruff>=0.14.0",
-    "mypy>=1.18.0"
+    "ruff>=0.11.0",
+    "mypy>=1.18.0",
+    "pre-commit>=4.0.0",
 ]
 
 [project.urls]
@@ -66,7 +67,7 @@ pythonpath = ["src"]
 asyncio_mode = "auto"
 
 [tool.ruff]
-line-length = 88
+line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
@@ -84,9 +85,12 @@ select = [
     "RUF",  # Ruff-specific rules
 ]
 ignore = [
-    "S101",  # Use of assert in tests is fine
-    "S603",  # Subprocess without shell=True is fine
-    "S607"   # Partial path for subprocess is fine
+    "S101",   # Use of assert in tests is fine
+    "S603",   # Subprocess without shell=True is fine
+    "S607",   # Partial path for subprocess is fine
+    "S110",   # try-except-pass is fine for optional fallbacks
+    "S311",   # Standard random is fine for jitter (not crypto)
+    "RUF006", # Fire-and-forget tasks are intentional for read receipts
 ]
 
 [tool.mypy]
