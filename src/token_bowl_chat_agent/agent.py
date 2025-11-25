@@ -17,10 +17,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain.agents import create_agent
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 from rich.console import Console
@@ -252,7 +251,7 @@ class TokenBowlAgent:
         # MCP components
         self.mcp_client: Any = None  # MultiServerMCPClient if enabled
         self.mcp_tools: list[Any] = []
-        self.agent_executor: AgentExecutor | None = None
+        self.agent: Any = None  # LangChain agent
 
         # Sent message tracking for read receipts
         # Use OrderedDict to maintain insertion order for efficient cleanup
@@ -366,26 +365,12 @@ class TokenBowlAgent:
                     f"[dim]MCP: Loaded {len(self.mcp_tools)} tools: {[t.name for t in self.mcp_tools]}[/dim]"
                 )
 
-            # Create agent executor with tools
+            # Create LangChain agent with tools
             if self.mcp_tools and self.llm:
-                prompt = ChatPromptTemplate.from_messages(
-                    [
-                        ("system", self.system_prompt),
-                        MessagesPlaceholder("chat_history", optional=True),
-                        ("human", "{input}"),
-                        MessagesPlaceholder("agent_scratchpad"),
-                    ]
-                )
-
-                agent = create_tool_calling_agent(self.llm, self.mcp_tools, prompt)
-                self.agent_executor = AgentExecutor(
-                    agent=agent,
+                self.agent = create_agent(
+                    self.llm,
                     tools=self.mcp_tools,
-                    verbose=self.verbose,
-                    return_intermediate_steps=True,
-                    handle_parsing_errors=True,
-                    max_iterations=50,
-                    max_execution_time=900,
+                    system_prompt=self.system_prompt,
                 )
 
                 console.print(
@@ -942,25 +927,44 @@ class TokenBowlAgent:
 
             # Call LLM with token tracking
             with get_openai_callback() as cb:
-                # Use agent executor if MCP is enabled, otherwise use direct LLM call
-                if self.agent_executor:
-                    # Use agent with tools
-                    result = await self.agent_executor.ainvoke(
-                        {
-                            "input": prompt,
-                            "chat_history": self.conversation_history,
-                        }
-                    )
-                    response_text = result.get("output", "")
+                # Use LangChain agent if MCP is enabled, otherwise use direct LLM call
+                if self.agent:
+                    # Build messages for the agent (system prompt is already configured)
+                    agent_messages: list[dict[str, Any]] = []
+
+                    # Add conversation history
+                    for msg in self.conversation_history:
+                        if isinstance(msg, HumanMessage):
+                            agent_messages.append(
+                                {"role": "user", "content": str(msg.content)}
+                            )
+                        elif isinstance(msg, AIMessage):
+                            agent_messages.append(
+                                {"role": "assistant", "content": str(msg.content)}
+                            )
+
+                    # Add current prompt
+                    agent_messages.append({"role": "user", "content": prompt})
+
+                    # Invoke LangChain agent
+                    result = await self.agent.ainvoke({"messages": agent_messages})
+
+                    # Extract response from the last AI message
+                    response_text = ""
+                    if "messages" in result:
+                        for msg in reversed(result["messages"]):
+                            if hasattr(msg, "content") and not hasattr(msg, "tool_calls"):
+                                response_text = str(msg.content)
+                                break
 
                     # Log tool calls if verbose
-                    if self.verbose and "intermediate_steps" in result:
-                        for step in result["intermediate_steps"]:
-                            if len(step) >= 2:
-                                action, observation = step
-                                console.print(
-                                    f"[dim]🔧 Tool: {action.tool} -> {str(observation)[:100]}...[/dim]"
-                                )
+                    if self.verbose and "messages" in result:
+                        for msg in result["messages"]:
+                            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                                for tool_call in msg.tool_calls:
+                                    console.print(
+                                        f"[dim]🔧 Tool: {tool_call.get('name', 'unknown')}[/dim]"
+                                    )
                 else:
                     # Direct LLM call without tools
                     llm_messages: list[dict[str, Any]] = [
