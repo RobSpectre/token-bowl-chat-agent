@@ -220,7 +220,9 @@ def run(
 
 @app.command()
 def send(
-    message: Annotated[str, typer.Argument(help="Message to send")],
+    message: Annotated[
+        str, typer.Argument(help="Message to send (or prompt for LLM if --model provided)")
+    ],
     api_key: ApiKey = None,
     to: Annotated[
         str | None,
@@ -231,9 +233,25 @@ def send(
         ),
     ] = None,
     server: Server = "wss://api.tokenbowl.ai",
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            "-m",
+            help="OpenRouter model name (enables LLM processing)",
+        ),
+    ] = None,
+    openrouter_key: OpenRouterKey = None,
+    system: SystemPrompt = None,
+    mcp: McpEnabled = True,
+    mcp_server: McpServer = "https://tokenbowl-mcp.haihai.ai/sse",
     verbose: Verbose = False,
 ) -> None:
-    """Send a single message to the chat server."""
+    """Send a single message to the chat server.
+
+    If --model is provided, the message is treated as a prompt and processed
+    through the LLM (with optional MCP tools) before sending the response.
+    """
     if not api_key:
         console.print(
             "[red]Error: Token Bowl Chat API key required. "
@@ -241,16 +259,38 @@ def send(
         )
         raise typer.Exit(1)
 
+    if model and not openrouter_key:
+        console.print(
+            "[red]Error: OpenRouter API key required when using --model. "
+            "Set OPENROUTER_API_KEY or use --openrouter-key[/red]"
+        )
+        raise typer.Exit(1)
+
     async def _send() -> None:
         # Convert WebSocket URL to HTTP URL for the REST API
         http_url = server.replace("wss://", "https://").replace("ws://", "http://")
+
+        # Determine the content to send
+        content_to_send = message
+
+        # If model is provided, process through LLM first
+        if model:
+            content_to_send = await _generate_llm_response(
+                prompt=message,
+                model_name=model,
+                openrouter_api_key=openrouter_key,  # type: ignore[arg-type]
+                system_prompt=system,
+                mcp_enabled=mcp,
+                mcp_server_url=mcp_server,
+                verbose=verbose,
+            )
 
         async with AsyncTokenBowlClient(api_key=api_key, base_url=http_url) as client:
             if verbose:
                 target = f"to @{to}" if to else "to room"
                 console.print(f"[dim]Sending message {target}...[/dim]")
 
-            response = await client.send_message(message, to_username=to)
+            response = await client.send_message(content_to_send, to_username=to)
 
             if to:
                 console.print(f"[green]✓ Sent DM to @{to}:[/green] {response.content[:100]}")
@@ -265,6 +305,130 @@ def send(
     except Exception as e:
         console.print(f"[red]Error sending message: {e}[/red]")
         raise typer.Exit(1) from None
+
+
+async def _generate_llm_response(
+    prompt: str,
+    model_name: str,
+    openrouter_api_key: str,
+    system_prompt: str | None = None,
+    mcp_enabled: bool = True,
+    mcp_server_url: str = "https://tokenbowl-mcp.haihai.ai/sse",
+    verbose: bool = False,
+) -> str:
+    """Generate a response using LLM with optional MCP tools.
+
+    Args:
+        prompt: The user prompt to process
+        model_name: OpenRouter model name
+        openrouter_api_key: OpenRouter API key
+        system_prompt: Optional system prompt (text or file path)
+        mcp_enabled: Whether to enable MCP tools
+        mcp_server_url: MCP server URL
+        verbose: Enable verbose output
+
+    Returns:
+        Generated response text
+    """
+    from pathlib import Path
+
+    from langchain.agents import create_agent
+    from langchain_community.callbacks import get_openai_callback
+    from langchain_openai import ChatOpenAI
+    from pydantic import SecretStr
+
+    # Load system prompt from file if it's a path
+    resolved_system_prompt = "You are a helpful assistant."
+    if system_prompt:
+        path = Path(system_prompt)
+        if path.exists() and path.is_file():
+            try:
+                resolved_system_prompt = path.read_text(encoding="utf-8")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not read prompt file: {e}[/yellow]")
+        else:
+            resolved_system_prompt = system_prompt
+
+    # Initialize LLM
+    llm = ChatOpenAI(
+        model=model_name,
+        api_key=SecretStr(openrouter_api_key),
+        base_url="https://openrouter.ai/api/v1",
+        streaming=False,
+        default_headers={
+            "HTTP-Referer": "https://github.com/RobSpectre/token-bowl-chat",
+            "X-Title": "Token Bowl Chat Agent",
+        },
+    )
+
+    if verbose:
+        console.print(f"[dim]Initialized LLM: {model_name}[/dim]")
+
+    # Initialize MCP if enabled
+    mcp_tools: list = []
+    agent = None
+
+    if mcp_enabled:
+        try:
+            from langchain_mcp_adapters.client import MultiServerMCPClient
+
+            mcp_client = MultiServerMCPClient(
+                {
+                    "tokenbowl": {
+                        "transport": "sse",
+                        "url": mcp_server_url,
+                    }
+                }
+            )
+
+            mcp_tools = await mcp_client.get_tools()
+
+            if verbose:
+                console.print(f"[dim]MCP: Connected with {len(mcp_tools)} tools[/dim]")
+
+            if mcp_tools:
+                agent = create_agent(
+                    llm,
+                    tools=mcp_tools,
+                    system_prompt=resolved_system_prompt,
+                )
+
+        except ImportError:
+            if verbose:
+                console.print("[dim]MCP libraries not available, skipping[/dim]")
+        except Exception as e:
+            if verbose:
+                console.print(f"[yellow]MCP initialization failed: {e}[/yellow]")
+
+    # Generate response
+    with get_openai_callback() as cb:
+        if agent:
+            # Use agent with tools
+            result = await agent.ainvoke({"messages": [{"role": "user", "content": prompt}]})
+
+            # Extract response from the last AI message
+            response_text = ""
+            if "messages" in result:
+                for msg in reversed(result["messages"]):
+                    if hasattr(msg, "content") and not hasattr(msg, "tool_calls"):
+                        response_text = str(msg.content)
+                        break
+        else:
+            # Direct LLM call without tools
+            messages = [
+                {"role": "system", "content": resolved_system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+            response = await llm.ainvoke(messages)
+            response_text = str(response.content) if response.content else ""
+
+        if verbose:
+            console.print(
+                f"[dim]Tokens used: {cb.total_tokens} "
+                f"({cb.prompt_tokens} in, {cb.completion_tokens} out)[/dim]"
+            )
+
+    return response_text.strip()
 
 
 def main() -> None:
