@@ -322,7 +322,7 @@ class TestGenerateLLMResponse:
 
     @pytest.mark.asyncio
     @patch("langchain.agents.create_agent")
-    @patch("langchain_mcp_adapters.client.MultiServerMCPClient")
+    @patch("langchain_mcp_adapters.client.MultiServerMCPClient", create=True)
     @patch("langchain_openai.ChatOpenAI")
     async def test_generate_response_with_mcp(
         self, mock_llm_class, mock_mcp_client_class, mock_create_agent
@@ -343,8 +343,8 @@ class TestGenerateLLMResponse:
         mock_agent = MagicMock()
         mock_ai_message = MagicMock()
         mock_ai_message.content = "Response from agent"
-        # Simulate no tool_calls attribute for final message
-        del mock_ai_message.tool_calls
+        # Simulate empty tool_calls for final message (real AIMessages have this attr)
+        mock_ai_message.tool_calls = []
         mock_agent.ainvoke = AsyncMock(return_value={"messages": [mock_ai_message]})
         mock_create_agent.return_value = mock_agent
 
@@ -361,7 +361,7 @@ class TestGenerateLLMResponse:
         mock_create_agent.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("langchain_mcp_adapters.client.MultiServerMCPClient")
+    @patch("langchain_mcp_adapters.client.MultiServerMCPClient", create=True)
     @patch("langchain_openai.ChatOpenAI")
     async def test_generate_response_mcp_connection_error(
         self, mock_llm_class, mock_mcp_client_class

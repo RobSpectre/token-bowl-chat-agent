@@ -922,12 +922,16 @@ class TokenBowlAgent:
                     result = await self.agent.ainvoke({"messages": agent_messages})
 
                     # Extract response from the last AI message
+                    # Look for a message with content but no active tool calls
                     response_text = ""
                     if "messages" in result:
                         for msg in reversed(result["messages"]):
-                            if hasattr(msg, "content") and not hasattr(msg, "tool_calls"):
-                                response_text = str(msg.content)
-                                break
+                            if hasattr(msg, "content") and msg.content:
+                                # Skip messages that have tool_calls (these are tool invocations)
+                                tool_calls = getattr(msg, "tool_calls", None)
+                                if not tool_calls:
+                                    response_text = str(msg.content)
+                                    break
 
                     # Log tool calls if verbose
                     if self.verbose and "messages" in result:

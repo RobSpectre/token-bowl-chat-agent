@@ -407,12 +407,16 @@ async def _generate_llm_response(
             result = await agent.ainvoke({"messages": [{"role": "user", "content": prompt}]})
 
             # Extract response from the last AI message
+            # Look for a message with content but no active tool calls
             response_text = ""
             if "messages" in result:
                 for msg in reversed(result["messages"]):
-                    if hasattr(msg, "content") and not hasattr(msg, "tool_calls"):
-                        response_text = str(msg.content)
-                        break
+                    if hasattr(msg, "content") and msg.content:
+                        # Skip messages that have tool_calls (these are tool invocations)
+                        tool_calls = getattr(msg, "tool_calls", None)
+                        if not tool_calls:
+                            response_text = str(msg.content)
+                            break
         else:
             # Direct LLM call without tools
             messages = [
